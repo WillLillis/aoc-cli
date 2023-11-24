@@ -174,10 +174,9 @@ impl AocClient {
         AocClientBuilder::default()
     }
 
-    pub fn get_config() -> Config {
-        if let Some(home_path) = home_dir() {
-            // check home directory first
-            let mut config_path = home_path.clone();
+    pub fn get_config() -> (Config, Option<PathBuf>) {
+        if let Some(home_dir) = home_dir() {
+            let mut config_path = home_dir.clone();
             config_path.push(CONFIG_FILE);
             if let Ok(config_contents) = std::fs::read_to_string(&config_path) {
                 match toml::from_str(&config_contents) {
@@ -186,44 +185,40 @@ impl AocClient {
                             "🦌 Config file loaded: {}",
                             config_path.display()
                         );
-                        return contents;
+                        return (contents, Some(config_path));
                     }
                     Err(e) => {
                         warn!(
                             "Failed to deserialize config file -- Error: {e}"
                         );
-                        return Config::default();
+                        return (Config::default(), None);
                     }
                 }
             }
-            // next try ~/.config
-            else {
-                let mut config_path = home_path.clone();
-                config_path.push(".config");
-                config_path.push(CONFIG_FILE);
-                if let Ok(config_contents) =
-                    std::fs::read_to_string(&config_path)
-                {
-                    match toml::from_str(&config_contents) {
-                        Ok(contents) => {
-                            debug!(
-                                "🦌 Config file loaded: {}",
-                                config_path.display()
-                            );
-                            return contents;
-                        }
-                        Err(e) => {
-                            warn!(
+        }
+        if let Some(config_dir) = config_dir() {
+            let mut config_path = config_dir.clone();
+            config_path.push(CONFIG_FILE);
+            if let Ok(config_contents) = std::fs::read_to_string(&config_path) {
+                match toml::from_str(&config_contents) {
+                    Ok(contents) => {
+                        debug!(
+                            "🦌 Config file loaded: {}",
+                            config_path.display()
+                        );
+                        return (contents, Some(config_path));
+                    }
+                    Err(e) => {
+                        warn!(
                             "Failed to deserialize config file -- Error: {e}"
                         );
-                            return Config::default();
-                        }
+                        return (Config::default(), None);
                     }
                 }
             }
         }
 
-        Config::default()
+        (Config::default(), None)
     }
 
     pub fn day_unlocked(&self) -> bool {
@@ -492,6 +487,35 @@ impl AocClient {
         Ok(())
     }
 
+    pub fn write_config(config: Config, path: &str) -> AocResult<()> {
+        let config_str = match toml::to_string(&config) {
+            Ok(ser) => ser,
+            Err(e) => {
+                return Err(AocError::ConfigError(format!(
+                    "Failed to serialize `Config` struct -- Error: {e}"
+                )));
+            }
+        };
+
+        let mut config_file = match std::fs::File::create(path) {
+            Ok(file) => file,
+            Err(e) => {
+                return Err(AocError::FileWriteError {
+                    filename: path.to_string(),
+                    source: e,
+                });
+            }
+        };
+
+        match config_file.write_all(config_str.as_bytes()) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(AocError::FileWriteError {
+                filename: path.to_string(),
+                source: e,
+            }),
+        }
+    }
+
     fn prompt_user_config(&self) -> AocResult<Config> {
         let now = FixedOffset::east_opt(RELEASE_TIMEZONE_OFFSET)
             .unwrap()
@@ -557,9 +581,17 @@ impl AocClient {
                 .interact_text()
                 .unwrap();
 
-        let mut default_path = home_dir().unwrap();
-        default_path.push(HIDDEN_SESSION_COOKIE_FILE);
-        let default_path = default_path.into_os_string().into_string().unwrap();
+        let mut home_path = match home_dir() {
+            Some(path) => path,
+            None => {
+                return Err(AocError::ConfigError(String::from(
+                    "Failed to resolve home directory",
+                )));
+            }
+        };
+        home_path.push(HIDDEN_SESSION_COOKIE_FILE);
+        let default_path = home_path.into_os_string().into_string().unwrap();
+
         let session_file: String = Input::with_theme(&ColorfulTheme::default())
             .with_prompt("Session File")
             .default(default_path.clone())
@@ -628,17 +660,28 @@ impl AocClient {
 
     pub fn user_init_config(&self) -> AocResult<()> {
         info!("Constructing config...");
-        let home = home_dir().unwrap();
 
-        let mut home_path = home.clone();
+        let mut home_path = match home_dir() {
+            Some(path) => path,
+            None => {
+                return Err(AocError::ConfigError(String::from(
+                    "Failed to resolve home directory",
+                )));
+            }
+        };
         home_path.push(CONFIG_FILE);
         let home_option = home_path.into_os_string().into_string().unwrap();
 
-        let mut dot_config_path = home.clone();
-        dot_config_path.push(".config");
-        dot_config_path.push(CONFIG_FILE);
-        let config_option =
-            dot_config_path.into_os_string().into_string().unwrap();
+        let mut config_path = match config_dir() {
+            Some(path) => path,
+            None => {
+                return Err(AocError::ConfigError(String::from(
+                    "Failed to resolve config directory",
+                )));
+            }
+        };
+        config_path.push(CONFIG_FILE);
+        let config_option = config_path.into_os_string().into_string().unwrap();
 
         let save_options = &[home_option, config_option];
 
@@ -651,34 +694,70 @@ impl AocClient {
 
         let config = self.prompt_user_config()?;
 
-        let config_str = match toml::to_string(&config) {
-            Ok(ser) => ser,
-            Err(e) => {
-                let err = format!(
-                    "Failed to serialize `Config` struct -- Error: {e}"
-                );
-                return Err(AocError::ConfigError(err));
+        Self::write_config(config, &save_options[save_location])?;
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_config(
+        &self,
+        year: Option<ConfigPuzzleYear>,
+        day: Option<ConfigPuzzleDay>,
+        session_file: &Option<String>,
+        width: Option<usize>,
+        input_filename: &Option<String>,
+        description_filename: &Option<String>,
+        private_leaderboard_id: Option<LeaderboardId>,
+    ) -> AocResult<()> {
+        let mut config;
+        let config_path;
+
+        match AocClient::get_config() {
+            (_, None) => {
+                return Err(AocError::ConfigError(String::from(
+                    "Failed to find/ read in existing config file. \
+                    Instantiate a fresh config file using `aoc init-config`",
+                )));
             }
-        };
-
-        let mut config_file =
-            match std::fs::File::create(&save_options[save_location]) {
-                Ok(file) => file,
-                Err(e) => {
-                    return Err(AocError::FileWriteError {
-                        filename: save_options[save_location].clone(),
-                        source: e,
-                    });
-                }
-            };
-
-        match config_file.write_all(config_str.as_bytes()) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(AocError::FileWriteError {
-                filename: save_options[save_location].clone(),
-                source: e,
-            }),
+            (config_in, Some(path)) => {
+                config = config_in;
+                config_path = path;
+            }
         }
+
+        debug!("Old config:\n{:#?}", config);
+
+        // set each argument (if provided) in turn
+        if let Some(new_year) = year {
+            config.year = new_year;
+        }
+        if let Some(new_day) = day {
+            config.day = new_day;
+        }
+        if session_file.is_some() {
+            config.session_file = session_file.clone();
+        }
+        if width.is_some() {
+            config.width = width;
+        }
+        if input_filename.is_some() {
+            config.input_filename = input_filename.clone();
+        }
+        if description_filename.is_some() {
+            config.description_filename = description_filename.clone();
+        }
+        if private_leaderboard_id.is_some() {
+            config.private_leaderboard_id = private_leaderboard_id;
+        }
+
+        debug!("Updated config:\n{:#?}", config);
+
+        Self::write_config(
+            config,
+            config_path.into_os_string().to_str().unwrap(),
+        )?;
+
+        Ok(())
     }
 
     fn get_private_leaderboard(

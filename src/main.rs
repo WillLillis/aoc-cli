@@ -4,7 +4,7 @@ use aoc_client::{
     AocClient, AocError, AocResult, ConfigPuzzleDay, ConfigPuzzleYear,
     DEFAULT_PUZZLE_DESCRIPTION, DEFAULT_PUZZLE_INPUT,
 };
-use args::{Args, Command};
+use args::{Args, Command, SetConfig};
 use clap::{crate_description, crate_name, Parser};
 use env_logger::{Builder, Env};
 use exit_code::*;
@@ -70,7 +70,7 @@ fn setup_log(args: &Args) {
 
 fn build_client(args: &Args) -> AocResult<AocClient> {
     let mut builder = AocClient::builder();
-    let config = AocClient::get_config();
+    let (config, _) = AocClient::get_config();
 
     match (&args.session_file, &config.session_file) {
         (Some(ref file), _) | (_, Some(ref file)) => {
@@ -170,6 +170,23 @@ fn run(args: &Args, client: AocClient) -> AocResult<()> {
             Ok(())
         }
         Some(Command::Init) => client.user_init_config(),
+        Some(Command::SetConfig(SetConfig {
+            config_year,
+            config_day,
+            config_session_file,
+            config_width,
+            config_input_filename,
+            config_description_filename,
+            config_private_leaderboard_id,
+        })) => client.set_config(
+            *config_year,
+            *config_day,
+            config_session_file,
+            *config_width,
+            config_input_filename,
+            config_description_filename,
+            *config_private_leaderboard_id,
+        ),
         Some(Command::Submit { part, answer }) => {
             client.submit_answer_and_show_outcome(part, answer)
         }
