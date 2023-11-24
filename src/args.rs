@@ -1,4 +1,7 @@
-use aoc_client::{LeaderboardId, PuzzleDay, PuzzleYear};
+use aoc_client::{
+    LeaderboardId, PuzzleDay, PuzzleYear, DEFAULT_PUZZLE_DESCRIPTION,
+    DEFAULT_PUZZLE_INPUT,
+};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
@@ -49,7 +52,7 @@ pub struct Args {
         alias = "input",
         global = true,
         value_name = "PATH",
-        default_value = "input"
+        default_value = DEFAULT_PUZZLE_INPUT,
     )]
     pub input_file: String,
 
@@ -60,7 +63,7 @@ pub struct Args {
         alias = "puzzle",
         global = true,
         value_name = "PATH",
-        default_value = "puzzle.md"
+        default_value = DEFAULT_PUZZLE_DESCRIPTION,
     )]
     pub puzzle_file: String,
 
@@ -91,6 +94,10 @@ pub enum Command {
     #[command(visible_alias = "r")]
     Read,
 
+    /// Create a config file
+    #[command(visible_alias = "i")]
+    Init,
+
     /// Submit puzzle answer
     #[command(visible_alias = "s")]
     Submit {
@@ -106,6 +113,6 @@ pub enum Command {
     #[command(visible_alias = "p")]
     PrivateLeaderboard {
         /// Private leaderboard ID
-        leaderboard_id: LeaderboardId,
+        leaderboard_id: Option<LeaderboardId>,
     },
 }

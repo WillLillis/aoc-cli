@@ -1,27 +1,31 @@
 use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, TimeZone, Utc};
 use colored::{Color, Colorize};
-use dirs::{config_dir, home_dir};
+use dialoguer::{theme::ColorfulTheme, FuzzySelect, Input};
+use dirs::config_dir;
+use home::home_dir;
 use html2md::parse_html;
 use html2text::{
     from_read, from_read_with_decorator,
     render::text_renderer::TrivialDecorator,
 };
 use http::StatusCode;
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use regex::Regex;
 use reqwest::blocking::Client as HttpClient;
 use reqwest::header::{
     HeaderMap, HeaderValue, CONTENT_TYPE, COOKIE, USER_AGENT,
 };
 use reqwest::redirect::Policy;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::cmp::{Ordering, Reverse};
 use std::collections::HashMap;
 use std::env;
-use std::fmt::{Display, Formatter};
+use std::fmt::{self, Display, Formatter};
 use std::fs::{read_to_string, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::string::ToString;
 use thiserror::Error;
 
 pub type PuzzleYear = i32;
@@ -53,6 +57,11 @@ const RELEASE_TIMEZONE_OFFSET: i32 = -5 * 3600;
 const SESSION_COOKIE_FILE: &str = "adventofcode.session";
 const HIDDEN_SESSION_COOKIE_FILE: &str = ".adventofcode.session";
 const SESSION_COOKIE_ENV_VAR: &str = "ADVENT_OF_CODE_SESSION";
+
+pub const DEFAULT_PUZZLE_INPUT: &str = "input";
+pub const DEFAULT_PUZZLE_DESCRIPTION: &str = "puzzle.md";
+
+const CONFIG_FILE: &str = ".adventofcode_config.toml";
 
 const DEFAULT_COL_WIDTH: usize = 80;
 
@@ -109,12 +118,20 @@ pub enum AocError {
     #[error("The private leaderboard does not exist or you are not a member")]
     PrivateLeaderboardNotAvailable,
 
+    #[error("No private leaderboard id. \
+        Provide an argument (e.g. \"aoc private-leaderboard <LEADERBOARD-ID>\") \
+        or add it to your config file.")]
+    PrivateLeaderboardNoId,
+
     #[error("Failed to write to file '{filename}': {source}")]
     FileWriteError {
         filename: String,
         #[source]
         source: std::io::Error,
     },
+
+    #[error("Configuration file error: {0}")]
+    ConfigError(String),
 
     #[error("Failed to create client due to missing field: {0}")]
     ClientFieldMissing(String),
@@ -136,6 +153,7 @@ pub struct AocClient {
     input_filename: PathBuf,
     puzzle_filename: PathBuf,
     show_html_markup: bool,
+    leaderboard_id: Option<LeaderboardId>,
 }
 
 #[must_use]
@@ -148,11 +166,64 @@ pub struct AocClientBuilder {
     input_filename: PathBuf,
     puzzle_filename: PathBuf,
     show_html_markup: bool,
+    leaderboard_id: Option<LeaderboardId>,
 }
 
 impl AocClient {
     pub fn builder() -> AocClientBuilder {
         AocClientBuilder::default()
+    }
+
+    pub fn get_config() -> Config {
+        if let Some(home_path) = home_dir() {
+            // check home directory first
+            let mut config_path = home_path.clone();
+            config_path.push(CONFIG_FILE);
+            if let Ok(config_contents) = std::fs::read_to_string(&config_path) {
+                match toml::from_str(&config_contents) {
+                    Ok(contents) => {
+                        debug!(
+                            "🦌 Config file loaded: {}",
+                            config_path.display()
+                        );
+                        return contents;
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Failed to deserialize config file -- Error: {e}"
+                        );
+                        return Config::default();
+                    }
+                }
+            }
+            // next try ~/.config
+            else {
+                let mut config_path = home_path.clone();
+                config_path.push(".config");
+                config_path.push(CONFIG_FILE);
+                if let Ok(config_contents) =
+                    std::fs::read_to_string(&config_path)
+                {
+                    match toml::from_str(&config_contents) {
+                        Ok(contents) => {
+                            debug!(
+                                "🦌 Config file loaded: {}",
+                                config_path.display()
+                            );
+                            return contents;
+                        }
+                        Err(e) => {
+                            warn!(
+                            "Failed to deserialize config file -- Error: {e}"
+                        );
+                            return Config::default();
+                        }
+                    }
+                }
+            }
+        }
+
+        Config::default()
     }
 
     pub fn day_unlocked(&self) -> bool {
@@ -421,6 +492,195 @@ impl AocClient {
         Ok(())
     }
 
+    fn prompt_user_config(&self) -> AocResult<Config> {
+        let now = FixedOffset::east_opt(RELEASE_TIMEZONE_OFFSET)
+            .unwrap()
+            .from_utc_datetime(&Utc::now().naive_utc());
+
+        let latest_year = if now.month() < DECEMBER {
+            now.year() - 1
+        } else {
+            now.year()
+        };
+
+        let config_year: ConfigPuzzleYear =
+            Input::with_theme(&ColorfulTheme::default())
+                .with_prompt("Puzzle Year")
+                .default(ConfigPuzzleYear::LatestYear)
+                .validate_with({
+                    move |input: &ConfigPuzzleYear| -> Result<(), String> {
+                        match input {
+                            ConfigPuzzleYear::LatestYear => Ok(()),
+                            ConfigPuzzleYear::Year(year) => {
+                                if (FIRST_EVENT_YEAR..=latest_year)
+                                    .contains(year)
+                                {
+                                    Ok(())
+                                } else {
+                                    let err = format!(
+                                        "Year must lie in the range {}-{}",
+                                        FIRST_EVENT_YEAR, latest_year
+                                    );
+                                    Err(err)
+                                }
+                            }
+                        }
+                    }
+                })
+                .interact_text()
+                .unwrap();
+
+        let config_day: ConfigPuzzleDay =
+            Input::with_theme(&ColorfulTheme::default())
+                .with_prompt("Puzzle Day")
+                .default(ConfigPuzzleDay::LatestDay)
+                .validate_with({
+                    move |input: &ConfigPuzzleDay| -> Result<(), String> {
+                        match input {
+                            ConfigPuzzleDay::LatestDay => Ok(()),
+                            ConfigPuzzleDay::Day(day) => {
+                                if (FIRST_PUZZLE_DAY..=LAST_PUZZLE_DAY)
+                                    .contains(day)
+                                {
+                                    Ok(())
+                                } else {
+                                    let err = format!(
+                                        "Day must lie in the range {}-{}",
+                                        FIRST_PUZZLE_DAY, LAST_PUZZLE_DAY
+                                    );
+                                    Err(err)
+                                }
+                            }
+                        }
+                    }
+                })
+                .interact_text()
+                .unwrap();
+
+        let mut default_path = home_dir().unwrap();
+        default_path.push(HIDDEN_SESSION_COOKIE_FILE);
+        let default_path = default_path.into_os_string().into_string().unwrap();
+        let session_file: String = Input::with_theme(&ColorfulTheme::default())
+            .with_prompt("Session File")
+            .default(default_path.clone())
+            .interact_text()
+            .unwrap();
+        let config_session_file = Some(session_file);
+
+        let width: usize = Input::with_theme(&ColorfulTheme::default())
+            .with_prompt("Column width")
+            .default(DEFAULT_COL_WIDTH)
+            .validate_with({
+                move |input: &usize| -> Result<(), &str> {
+                    if *input > 0 {
+                        Ok(())
+                    } else {
+                        Err("Column width must be greater than 0")
+                    }
+                }
+            })
+            .interact_text()
+            .unwrap();
+        let config_width = Some(width);
+
+        let input_filename = Input::with_theme(&ColorfulTheme::default())
+            .with_prompt("Puzzle input filename")
+            .default(String::from(DEFAULT_PUZZLE_INPUT))
+            .interact_text()
+            .unwrap();
+        let config_input_filename = Some(input_filename);
+
+        let description_filename = Input::with_theme(&ColorfulTheme::default())
+            .with_prompt("Puzzle description filename")
+            .default(String::from(DEFAULT_PUZZLE_DESCRIPTION))
+            .interact_text()
+            .unwrap();
+        let config_description_filename = Some(description_filename);
+
+        let set_leaderboard_id: bool =
+            Input::with_theme(&ColorfulTheme::default())
+                .with_prompt("Store Private leaderboard ID?")
+                .default(false)
+                .interact_text()
+                .unwrap();
+
+        let config_leaderboard_id = if set_leaderboard_id {
+            let leaderboard_id: LeaderboardId =
+                Input::with_theme(&ColorfulTheme::default())
+                    .with_prompt("Private leaderboard ID")
+                    .interact_text()
+                    .unwrap();
+            Some(leaderboard_id)
+        } else {
+            None
+        };
+
+        Ok(Config {
+            year: config_year,
+            day: config_day,
+            session_file: config_session_file,
+            width: config_width,
+            input_filename: config_input_filename,
+            description_filename: config_description_filename,
+            private_leaderboard_id: config_leaderboard_id,
+        })
+    }
+
+    pub fn user_init_config(&self) -> AocResult<()> {
+        info!("Constructing config...");
+        let home = home_dir().unwrap();
+
+        let mut home_path = home.clone();
+        home_path.push(CONFIG_FILE);
+        let home_option = home_path.into_os_string().into_string().unwrap();
+
+        let mut dot_config_path = home.clone();
+        dot_config_path.push(".config");
+        dot_config_path.push(CONFIG_FILE);
+        let config_option =
+            dot_config_path.into_os_string().into_string().unwrap();
+
+        let save_options = &[home_option, config_option];
+
+        let save_location = FuzzySelect::with_theme(&ColorfulTheme::default())
+            .with_prompt("Config file location")
+            .default(0)
+            .items(&save_options[..])
+            .interact()
+            .unwrap();
+
+        let config = self.prompt_user_config()?;
+
+        let config_str = match toml::to_string(&config) {
+            Ok(ser) => ser,
+            Err(e) => {
+                let err = format!(
+                    "Failed to serialize `Config` struct -- Error: {e}"
+                );
+                return Err(AocError::ConfigError(err));
+            }
+        };
+
+        let mut config_file =
+            match std::fs::File::create(&save_options[save_location]) {
+                Ok(file) => file,
+                Err(e) => {
+                    return Err(AocError::FileWriteError {
+                        filename: save_options[save_location].clone(),
+                        source: e,
+                    });
+                }
+            };
+
+        match config_file.write_all(config_str.as_bytes()) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(AocError::FileWriteError {
+                filename: save_options[save_location].clone(),
+                source: e,
+            }),
+        }
+    }
+
     fn get_private_leaderboard(
         &self,
         leaderboard_id: LeaderboardId,
@@ -448,10 +708,21 @@ impl AocClient {
 
     pub fn show_private_leaderboard(
         &self,
-        leaderboard_id: LeaderboardId,
+        leaderboard_id: Option<LeaderboardId>,
     ) -> AocResult<()> {
         let last_unlocked_day = last_unlocked_day(self.year)
             .ok_or(AocError::InvalidEventYear(self.year))?;
+
+        let leaderboard_id = match leaderboard_id {
+            Some(id) => id, // passed in as arg
+            None => {
+                if let Some(id) = self.leaderboard_id {
+                    id // from config file
+                } else {
+                    return Err(AocError::PrivateLeaderboardNoId);
+                }
+            }
+        };
         let leaderboard = self.get_private_leaderboard(leaderboard_id)?;
         let owner_name = leaderboard
             .get_owner_name()
@@ -535,6 +806,7 @@ impl Default for AocClientBuilder {
         let input_filename = "input".into();
         let puzzle_filename = "puzzle.md".into();
         let show_html_markup = false;
+        let leaderboard_id = None;
 
         Self {
             session_cookie,
@@ -545,6 +817,7 @@ impl Default for AocClientBuilder {
             input_filename,
             puzzle_filename,
             show_html_markup,
+            leaderboard_id,
         }
     }
 }
@@ -583,6 +856,7 @@ impl AocClientBuilder {
             input_filename: self.input_filename.clone(),
             puzzle_filename: self.puzzle_filename.clone(),
             show_html_markup: self.show_html_markup,
+            leaderboard_id: self.leaderboard_id,
         })
     }
 
@@ -735,6 +1009,14 @@ impl AocClientBuilder {
 
     pub fn show_html_markup(&mut self, show: bool) -> &mut Self {
         self.show_html_markup = show;
+        self
+    }
+
+    pub fn leaderboard_id(
+        &mut self,
+        leaderboard_id: Option<LeaderboardId>,
+    ) -> &mut Self {
+        self.leaderboard_id = leaderboard_id;
         self
     }
 }
@@ -903,4 +1185,79 @@ impl TryFrom<i64> for PuzzlePart {
             _ => Err(AocError::InvalidPuzzlePart),
         }
     }
+}
+
+#[derive(Debug, Serialize, Deserialize, Default, Clone, Copy)]
+pub enum ConfigPuzzleYear {
+    #[default]
+    LatestYear,
+    Year(PuzzleYear),
+}
+
+impl FromStr for ConfigPuzzleYear {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.eq("LatestYear") {
+            Ok(Self::LatestYear)
+        } else if let Ok(num) = s.parse::<PuzzleYear>() {
+            Ok(Self::Year(num))
+        } else {
+            Err(format!(
+                "unknown variant `{}`, expected `LatestYear` or value of type `PuzzleYear`",
+                s
+            ))
+        }
+    }
+}
+
+impl fmt::Display for ConfigPuzzleYear {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ConfigPuzzleYear::LatestYear => write!(f, "LatestYear"),
+            ConfigPuzzleYear::Year(year) => write!(f, "{}", year),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Default, Clone, Copy)]
+pub enum ConfigPuzzleDay {
+    #[default]
+    LatestDay,
+    Day(PuzzleDay),
+}
+
+impl FromStr for ConfigPuzzleDay {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.eq("LatestDay") {
+            Ok(Self::LatestDay)
+        } else if let Ok(num) = s.parse::<PuzzleDay>() {
+            Ok(Self::Day(num))
+        } else {
+            Err(format!(
+                "unknown variant `{}`, expected `LatestDay` or value of type `PuzzleDay`",
+                s
+            ))
+        }
+    }
+}
+
+impl fmt::Display for ConfigPuzzleDay {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ConfigPuzzleDay::LatestDay => write!(f, "LatestDay"),
+            ConfigPuzzleDay::Day(day) => write!(f, "{}", day),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct Config {
+    pub year: ConfigPuzzleYear,
+    pub day: ConfigPuzzleDay,
+    pub session_file: Option<String>,
+    pub width: Option<usize>,
+    pub input_filename: Option<String>,
+    pub description_filename: Option<String>,
+    pub private_leaderboard_id: Option<LeaderboardId>,
 }
