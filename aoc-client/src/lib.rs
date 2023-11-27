@@ -487,7 +487,12 @@ impl AocClient {
         Ok(())
     }
 
-    pub fn write_config(&self, config: Config, path: &str) -> AocResult<()> {
+    pub fn write_config(
+        &self,
+        config: Config,
+        path: &str,
+        overwrite: bool,
+    ) -> AocResult<()> {
         let config_str = match toml::to_string(&config) {
             Ok(ser) => ser,
             Err(e) => {
@@ -497,7 +502,7 @@ impl AocClient {
             }
         };
 
-        save_file(path, self.overwrite_files, &config_str)?;
+        save_file(path, overwrite, &config_str)?;
         Ok(())
     }
 
@@ -679,7 +684,11 @@ impl AocClient {
 
         let config = self.prompt_user_config()?;
 
-        self.write_config(config, &save_options[save_location])?;
+        self.write_config(
+            config,
+            &save_options[save_location],
+            self.overwrite_files,
+        )?;
         Ok(())
     }
 
@@ -739,6 +748,7 @@ impl AocClient {
         self.write_config(
             config,
             config_path.into_os_string().to_str().unwrap(),
+            true,
         )?;
 
         Ok(())
