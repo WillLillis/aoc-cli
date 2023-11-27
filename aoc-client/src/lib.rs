@@ -487,7 +487,7 @@ impl AocClient {
         Ok(())
     }
 
-    pub fn write_config(config: Config, path: &str) -> AocResult<()> {
+    pub fn write_config(&self, config: Config, path: &str) -> AocResult<()> {
         let config_str = match toml::to_string(&config) {
             Ok(ser) => ser,
             Err(e) => {
@@ -497,23 +497,8 @@ impl AocClient {
             }
         };
 
-        let mut config_file = match std::fs::File::create(path) {
-            Ok(file) => file,
-            Err(e) => {
-                return Err(AocError::FileWriteError {
-                    filename: path.to_string(),
-                    source: e,
-                });
-            }
-        };
-
-        match config_file.write_all(config_str.as_bytes()) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(AocError::FileWriteError {
-                filename: path.to_string(),
-                source: e,
-            }),
-        }
+        save_file(path, self.overwrite_files, &config_str)?;
+        Ok(())
     }
 
     fn prompt_user_config(&self) -> AocResult<Config> {
@@ -694,7 +679,7 @@ impl AocClient {
 
         let config = self.prompt_user_config()?;
 
-        Self::write_config(config, &save_options[save_location])?;
+        self.write_config(config, &save_options[save_location])?;
         Ok(())
     }
 
@@ -727,7 +712,6 @@ impl AocClient {
 
         debug!("Old config:\n{:#?}", config);
 
-        // set each argument (if provided) in turn
         if let Some(new_year) = year {
             config.year = new_year;
         }
@@ -752,7 +736,7 @@ impl AocClient {
 
         debug!("Updated config:\n{:#?}", config);
 
-        Self::write_config(
+        self.write_config(
             config,
             config_path.into_os_string().to_str().unwrap(),
         )?;
