@@ -102,6 +102,10 @@ pub enum Command {
     #[command(visible_alias = "se")]
     SetConfig(SetConfig),
 
+    /// Unset a value in the config
+    #[command(visible_alias = "use")]
+    UnsetConfig(UnsetConfig),
+
     /// Submit puzzle answer
     #[command(visible_alias = "s")]
     Submit {
@@ -151,4 +155,36 @@ pub struct SetConfig {
     /// Set the config private leaderboard id
     #[arg(visible_alias = "id", long)]
     pub private_leaderboard_id: Option<LeaderboardId>,
+}
+
+#[derive(Parser, Debug)]
+#[command(version, about)]
+pub struct UnsetConfig {
+    /// Unset the config puzzle year
+    #[structopt(visible_alias = "uy", long)]
+    pub unset_year: bool,
+
+    /// Unset the config puzzle day
+    #[structopt(visible_alias = "ud", long)]
+    pub unset_day: bool,
+
+    /// Unset the config session filename
+    #[structopt(visible_alias = "sf", long)]
+    pub unset_session_file: bool,
+
+    /// Unset the width
+    #[structopt(visible_alias = "w", long)]
+    pub unset_width: bool,
+
+    /// Unset the config input filename
+    #[structopt(visible_alias = "if", long)]
+    pub unset_input_filename: bool,
+
+    /// Unset the config description filename
+    #[structopt(visible_alias = "df", long)]
+    pub unset_description_filename: bool,
+
+    /// Unset the config private leaderboard id
+    #[structopt(visible_alias = "id", long)]
+    pub unset_private_leaderboard_id: bool,
 }

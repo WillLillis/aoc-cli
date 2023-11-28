@@ -4,7 +4,7 @@ use aoc_client::{
     AocClient, AocError, AocResult, ConfigOption, DEFAULT_PUZZLE_DESCRIPTION,
     DEFAULT_PUZZLE_INPUT,
 };
-use args::{Args, Command, SetConfig};
+use args::{Args, Command, SetConfig, UnsetConfig};
 use clap::{crate_description, crate_name, Parser};
 use env_logger::{Builder, Env};
 use exit_code::*;
@@ -201,6 +201,23 @@ fn run(args: &Args, client: AocClient) -> AocResult<()> {
             input_filename,
             description_filename,
             *private_leaderboard_id,
+        ),
+        Some(Command::UnsetConfig(UnsetConfig {
+            unset_year,
+            unset_day,
+            unset_session_file,
+            unset_width,
+            unset_input_filename,
+            unset_description_filename,
+            unset_private_leaderboard_id,
+        })) => client.unset_config(
+            *unset_year,
+            *unset_day,
+            *unset_session_file,
+            *unset_width,
+            *unset_input_filename,
+            *unset_description_filename,
+            *unset_private_leaderboard_id,
         ),
         Some(Command::Submit { part, answer }) => {
             client.submit_answer_and_show_outcome(part, answer)

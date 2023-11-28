@@ -745,6 +745,68 @@ impl AocClient {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn unset_config(
+        &self,
+        unset_year: bool,
+        unset_day: bool,
+        unset_session_filename: bool,
+        unset_width: bool,
+        unset_input_filename: bool,
+        unset_description_filename: bool,
+        unset_private_leaderboard_id: bool,
+    ) -> AocResult<()> {
+        let mut config;
+        let config_path;
+
+        match AocClient::get_config() {
+            (_, None) => {
+                return Err(AocError::ConfigError(String::from(
+                    "Failed to find/ read in existing config file. \
+                    Instantiate a fresh config file using `aoc init-config`",
+                )));
+            }
+            (config_in, Some(path)) => {
+                config = config_in;
+                config_path = path;
+            }
+        }
+
+        debug!("Old config:\n{:#?}", config);
+
+        if unset_year {
+            config.year = ConfigOption::new(None);
+        }
+        if unset_day {
+            config.day = ConfigOption::new(None);
+        }
+        if unset_session_filename {
+            config.session_file = ConfigOption::new(None);
+        }
+        if unset_width {
+            config.width = ConfigOption::new(None);
+        }
+        if unset_input_filename {
+            config.input_filename = ConfigOption::new(None);
+        }
+        if unset_description_filename {
+            config.description_filename = ConfigOption::new(None);
+        }
+        if unset_private_leaderboard_id {
+            config.private_leaderboard_id = ConfigOption::new(None);
+        }
+
+        debug!("Updated config:\n{:#?}", config);
+
+        self.write_config(
+            config,
+            config_path.into_os_string().to_str().unwrap(),
+            true,
+        )?;
+
+        Ok(())
+    }
+
     fn get_private_leaderboard(
         &self,
         leaderboard_id: LeaderboardId,
