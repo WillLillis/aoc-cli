@@ -161,11 +161,11 @@ pub struct SetConfig {
 #[command(version, about)]
 pub struct UnsetConfig {
     /// Unset the config puzzle year
-    #[structopt(visible_alias = "uy", long)]
+    #[structopt(visible_alias = "y", long)]
     pub unset_year: bool,
 
     /// Unset the config puzzle day
-    #[structopt(visible_alias = "ud", long)]
+    #[structopt(visible_alias = "d", long)]
     pub unset_day: bool,
 
     /// Unset the config session filename
