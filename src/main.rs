@@ -1,8 +1,8 @@
 mod args;
 
 use aoc_client::{
-    AocClient, AocError, AocResult, ConfigPuzzleDay, ConfigPuzzleYear,
-    DEFAULT_PUZZLE_DESCRIPTION, DEFAULT_PUZZLE_INPUT,
+    AocClient, AocError, AocResult, ConfigOption, DEFAULT_PUZZLE_DESCRIPTION,
+    DEFAULT_PUZZLE_INPUT,
 };
 use args::{Args, Command, SetConfig};
 use clap::{crate_description, crate_name, Parser};
@@ -72,7 +72,7 @@ fn build_client(args: &Args) -> AocResult<AocClient> {
     let mut builder = AocClient::builder();
     let (config, _) = AocClient::get_config();
 
-    match (&args.session_file, &config.session_file) {
+    match (&args.session_file, &config.session_file.inner) {
         (Some(ref file), _) | (_, Some(ref file)) => {
             builder.session_cookie_from_file(file)?;
         }
@@ -81,44 +81,48 @@ fn build_client(args: &Args) -> AocResult<AocClient> {
         }
     }
 
+    // CLI args override config, if neither are provided use default (latest)
     match ((args.year, args.day), (config.year, config.day)) {
         // Specific Year, Specific Day
         ((Some(year), Some(day)), (_, _))
-        | ((Some(year), None), (_, ConfigPuzzleDay::Day(day)))
-        | ((None, Some(day)), (ConfigPuzzleYear::Year(year), _))
+        | ((Some(year), None), (_, ConfigOption { inner: Some(day) }))
+        | ((None, Some(day)), (ConfigOption { inner: Some(year) }, _))
         | (
             (None, None),
-            (ConfigPuzzleYear::Year(year), ConfigPuzzleDay::Day(day)),
+            (
+                ConfigOption { inner: Some(year) },
+                ConfigOption { inner: Some(day) },
+            ),
         ) => {
             builder.year(year)?.day(day)?;
         }
-        // Specific Year, Latest Day
-        ((Some(year), None), (_, ConfigPuzzleDay::LatestDay))
+        // Specific Year, Unspecified Day
+        ((Some(year), None), (_, ConfigOption { inner: None }))
         | (
             (None, None),
-            (ConfigPuzzleYear::Year(year), ConfigPuzzleDay::LatestDay),
+            (ConfigOption { inner: Some(year) }, ConfigOption { inner: None }),
         ) => {
             builder.year(year)?.latest_puzzle_day()?;
         }
-        // Latest Year, Specific Day
-        ((None, Some(day)), (ConfigPuzzleYear::LatestYear, _))
+        // Unspecified Year, Specific Day
+        ((None, Some(day)), (ConfigOption { inner: None }, _))
         | (
             (None, None),
-            (ConfigPuzzleYear::LatestYear, ConfigPuzzleDay::Day(day)),
+            (ConfigOption { inner: None }, ConfigOption { inner: Some(day) }),
         ) => {
             builder.latest_event_year()?.day(day)?;
         }
-        // Latest Year, Latest Day
+        // Unspecified Year, Unspecified Day
         (
             (None, None),
-            (ConfigPuzzleYear::LatestYear, ConfigPuzzleDay::LatestDay),
+            (ConfigOption { inner: None }, ConfigOption { inner: None }),
         ) => {
             builder.latest_event_year()?.latest_puzzle_day()?;
         }
     }
 
     match (args.width, config.width) {
-        (Some(width), _) | (_, Some(width)) => {
+        (Some(width), _) | (_, ConfigOption { inner: Some(width) }) => {
             builder.output_width(width)?;
         }
         _ => {}
@@ -129,7 +133,12 @@ fn build_client(args: &Args) -> AocResult<AocClient> {
         config.input_filename,
         args.input_file.eq(DEFAULT_PUZZLE_INPUT),
     ) {
-        (Some(input_file), true) => {
+        (
+            ConfigOption {
+                inner: Some(input_file),
+            },
+            true,
+        ) => {
             builder.input_filename(&input_file);
         }
         _ => {
@@ -142,7 +151,12 @@ fn build_client(args: &Args) -> AocResult<AocClient> {
         config.description_filename,
         args.puzzle_file.eq(DEFAULT_PUZZLE_DESCRIPTION),
     ) {
-        (Some(input_file), true) => {
+        (
+            ConfigOption {
+                inner: Some(input_file),
+            },
+            true,
+        ) => {
             builder.puzzle_filename(&input_file);
         }
         _ => {
@@ -150,10 +164,11 @@ fn build_client(args: &Args) -> AocResult<AocClient> {
         }
     }
 
+    let leaderboard_id = config.private_leaderboard_id.inner;
     builder
         .overwrite_files(args.overwrite)
         .show_html_markup(args.show_html_markup)
-        .leaderboard_id(config.private_leaderboard_id)
+        .leaderboard_id(leaderboard_id)
         .build()
 }
 
@@ -171,21 +186,21 @@ fn run(args: &Args, client: AocClient) -> AocResult<()> {
         }
         Some(Command::Init) => client.user_init_config(),
         Some(Command::SetConfig(SetConfig {
-            config_year,
-            config_day,
-            config_session_file,
-            config_width,
-            config_input_filename,
-            config_description_filename,
-            config_private_leaderboard_id,
+            year,
+            day,
+            session_file,
+            width,
+            input_filename,
+            description_filename,
+            private_leaderboard_id,
         })) => client.set_config(
-            *config_year,
-            *config_day,
-            config_session_file,
-            *config_width,
-            config_input_filename,
-            config_description_filename,
-            *config_private_leaderboard_id,
+            *year,
+            *day,
+            session_file,
+            *width,
+            input_filename,
+            description_filename,
+            *private_leaderboard_id,
         ),
         Some(Command::Submit { part, answer }) => {
             client.submit_answer_and_show_outcome(part, answer)

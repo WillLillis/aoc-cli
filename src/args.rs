@@ -1,6 +1,6 @@
 use aoc_client::{
-    ConfigPuzzleDay, ConfigPuzzleYear, LeaderboardId, PuzzleDay, PuzzleYear,
-    DEFAULT_PUZZLE_DESCRIPTION, DEFAULT_PUZZLE_INPUT,
+    LeaderboardId, PuzzleDay, PuzzleYear, DEFAULT_PUZZLE_DESCRIPTION,
+    DEFAULT_PUZZLE_INPUT,
 };
 use clap::{Parser, Subcommand};
 
@@ -126,29 +126,29 @@ pub enum Command {
 pub struct SetConfig {
     /// Set the config puzzle year
     #[arg(visible_alias = "y", long)]
-    pub config_year: Option<ConfigPuzzleYear>,
+    pub year: Option<PuzzleYear>,
 
     /// Set the config puzzle day
     #[arg(visible_alias = "d", long)]
-    pub config_day: Option<ConfigPuzzleDay>,
+    pub day: Option<PuzzleDay>,
 
     /// Set the config session filename
     #[arg(visible_alias = "sf", long)]
-    pub config_session_file: Option<String>,
+    pub session_file: Option<String>,
 
     /// Set the width
     #[arg(visible_alias = "w", long)]
-    pub config_width: Option<usize>,
+    pub width: Option<usize>,
 
     /// Set the config input filename
     #[arg(visible_alias = "if", long)]
-    pub config_input_filename: Option<String>,
+    pub input_filename: Option<String>,
 
     /// Set the config description filename
     #[arg(visible_alias = "df", long)]
-    pub config_description_filename: Option<String>,
+    pub description_filename: Option<String>,
 
     /// Set the config private leaderboard id
     #[arg(visible_alias = "id", long)]
-    pub config_private_leaderboard_id: Option<LeaderboardId>,
+    pub private_leaderboard_id: Option<LeaderboardId>,
 }
